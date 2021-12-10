@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .layer_norm_half import LayerNormFloat16Support as LayerNorm
+
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -139,7 +141,7 @@ class ModifiedResNet(nn.Module):
             x = self.avgpool(x)
             return x
 
-        x = x.type(self.conv1.weight.dtype)
+        x = x.to(self.conv1.weight.dtype)
         x = stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -148,16 +150,6 @@ class ModifiedResNet(nn.Module):
         x = self.attnpool(x)
 
         return x
-
-
-class LayerNorm(nn.LayerNorm):
-    """Subclass torch's LayerNorm to handle fp16."""
-
-    def forward(self, x: torch.Tensor):
-        orig_type = x.dtype
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
 
 class QuickGELU(nn.Module):
     def forward(self, x: torch.Tensor):
@@ -179,7 +171,8 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = attn_mask
 
     def attention(self, x: torch.Tensor):
-        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        if self.attn_mask is not None:
+            self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device)
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward(self, x: torch.Tensor):
@@ -334,16 +327,16 @@ class CLIP(nn.Module):
         return self.visual.conv1.weight.dtype
 
     def encode_image(self, image):
-        return self.visual(image.type(self.dtype))
+        return self.visual(image.to(self.dtype))
 
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
 
-        x = x + self.positional_embedding.type(self.dtype)
+        x = x + self.positional_embedding.to(self.dtype)
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x).type(self.dtype)
+        x = self.ln_final(x).to(self.dtype)
 
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
@@ -356,8 +349,8 @@ class CLIP(nn.Module):
         text_features = self.encode_text(text)
 
         # normalized features
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+        text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
