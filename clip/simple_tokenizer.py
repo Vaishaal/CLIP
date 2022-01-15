@@ -81,13 +81,16 @@ class SimpleTokenizer(object):
         if token in self.cache:
             return self.cache[token]
         word = tuple(token[:-1]) + ( token[-1] + '</w>',)
-        pairs = get_pairs(word)
+        pairs = sorted([x for x in get_pairs(word)])
 
         if not pairs:
             return token+'</w>'
-
+        import torch
         while True:
-            bigram = min(pairs, key = lambda pair: self.bpe_ranks.get(pair, float('inf')))
+            key_fn =  lambda pair: self.bpe_ranks.get(pair, float('inf'))
+            pair_values = torch.tensor([key_fn(x) for x in pairs])
+            _min_idx = torch.argmin(pair_values)
+            bigram = min(pairs, key = key_fn)
             if bigram not in self.bpe_ranks:
                 break
             first, second = bigram
@@ -113,7 +116,7 @@ class SimpleTokenizer(object):
             if len(word) == 1:
                 break
             else:
-                pairs = get_pairs(word)
+                pairs = sorted([x for x in get_pairs(word)])
         word = ' '.join(word)
         self.cache[token] = word
         return word

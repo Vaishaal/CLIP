@@ -76,12 +76,12 @@ class AttentionPool2d(nn.Module):
             q_proj_weight=self.q_proj.weight,
             k_proj_weight=self.k_proj.weight,
             v_proj_weight=self.v_proj.weight,
-            in_proj_weight=None,
+            in_proj_weight=torch.cat([self.q_proj.weight, self.k_proj.weight, self.v_proj.weight]),
             in_proj_bias=torch.cat([self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]),
             bias_k=None,
             bias_v=None,
             add_zero_attn=False,
-            dropout_p=0,
+            dropout_p=0.0,
             out_proj_weight=self.c_proj.weight,
             out_proj_bias=self.c_proj.bias,
             use_separate_proj_weight=True,
@@ -134,15 +134,15 @@ class ModifiedResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
+    def stem(self, x):
+        x0 = self.relu(self.bn3(self.conv3(self.relu(self.bn2(self.conv2(self.relu(self.bn1(self.conv1(x)))))))))
+        x1 = self.avgpool(x0)
+        return x1
+
     def forward(self, x):
-        def stem(x):
-            for conv, bn in [(self.conv1, self.bn1), (self.conv2, self.bn2), (self.conv3, self.bn3)]:
-                x = self.relu(bn(conv(x)))
-            x = self.avgpool(x)
-            return x
 
         x = x.to(self.conv1.weight.dtype)
-        x = stem(x)
+        x = self.stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
